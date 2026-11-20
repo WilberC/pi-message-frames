@@ -120,12 +120,11 @@ export function installFrames(targets, tui) {
   const collapse = !!(opts?.collapse);
   const collapsedLines = Math.max(1, opts?.collapsedLines ?? 3);
   const done = opts?.done;
-  const timer = opts?.timer;
-  const clock = opts?.clock;
-  return {proto, title, hue, old: state0, collapse, collapsedLines, done, timer, clock};
+  const visible = opts?.visible;
+  return {proto, title, hue, old: state0, collapse, collapsedLines, done, visible};
  });
  const owned = [];
- for (const {proto, title, hue, old, collapse, collapsedLines, done, timer, clock} of entries) {
+ for (const {proto, title, hue, old, collapse, collapsedLines, done, visible} of entries) {
   if (old) { old.leases++; owned.push([proto, old]); continue; }
   const descriptor = Object.getOwnPropertyDescriptor(proto, 'render');
   const original = proto.render;
@@ -144,13 +143,19 @@ export function installFrames(targets, tui) {
    layouts.delete(this);
    if (width <= 0) return [];
    let life = lifetimes.get(this);
+   const first = !life;
    if (!life) { life = {collapsed: collapse ? true : undefined, firstMs: Date.now(), lastMs: 0, frozen: false}; lifetimes.set(this, life); }
    // Freeze the render-cycle timer once the component's own work is done, so
    // unrelated redraws (user idle, other components streaming) do not inflate it.
-   if (!life.frozen && done?.(this)) { life.frozen = true; }
+   // A frame whose done predicate fires on its first render is static: it gets
+   // a start time but no meaningful end or duration.
+   if (!life.frozen && done?.(this)) { life.frozen = true; life.static = first; }
    if (!life.frozen) life.lastMs = Date.now();
    life.done = life.frozen;
-   const show = {timer: timer?.(this) ?? true, clock: clock?.(this) ?? true};
+   // Three independent title parts: duration, start time, end time. Each
+   // defaults to shown; a `visible` callback returns the live toggles.
+   const vis = visible?.(this) ?? {};
+   const show = {timer: vis.timer ?? true, start: vis.start ?? true, end: vis.end ?? true};
    const body = original.call(this, Math.max(1, width - 2));
    if (!body.length) return body; // Preserve intentionally hidden/tool-only components.
    let rows = body.flatMap((s, y) => s.split('\n').map(text => ({text, y, x: 0})));

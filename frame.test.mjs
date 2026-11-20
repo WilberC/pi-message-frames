@@ -129,10 +129,15 @@ test('done predicate freezes the render-cycle timer at completion', () => {
  ctl.restore();
 });
 
-test('timer and clock toggles hide their title parts', () => {
+test('visible toggles hide their title parts', () => {
  class M { render(w) { return ['x']; } }
- const ctl = installFrames([[M, (_c, m, show) => `${show.timer ? 'T' : '-'}${show.clock ? 'C' : '-'}`, [90,170,230], {timer: () => true, clock: () => true}]], tui);
+ const origRender = M.prototype.render;
+ const ctl = installFrames([[M, (_c, m, show) => `T${show.timer?1:0}S${show.start?1:0}E${show.end?1:0}`, [90,170,230], {visible: () => ({timer: true, start: false, end: true})}]], tui);
  const inst = new M();
- assert.match(inst.render(20).map(plain).join(''), /TC/);
+ assert.match(inst.render(20).map(plain).join(''), /T1S0E1/);
  ctl.restore();
+ const off = installFrames([[M, (_c, _m, show) => `T${show.timer?1:0}S${show.start?1:0}E${show.end?1:0}`, [90,170,230], {}]], tui);
+ assert.match(new M().render(20).map(plain).join(''), /T1S1E1/);
+ off.restore();
+ assert.equal(M.prototype.render, origRender);
 });
