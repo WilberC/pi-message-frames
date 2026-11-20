@@ -1,9 +1,13 @@
-# Message frames (local, experimental)
+# Message frames (fork with collapse + timestamps)
 
-Presentation-only framing for the installed Pi 1.5.0 / Gentle Pi main build.
-Install it by copying this directory to `~/.pi/agent/extensions/message-frames/`
-(`install.sh` does it). Its `index.ts` is auto-discovered. No
-settings changes or dependencies are needed. Run `/reload` to load it.
+Fork of [`message-frames`](https://github.com/RamonsDka/gs3-sidebar/tree/main/extensions/message-frames)
+by RamonsDka (MIT), extended with **passive collapse**, **click to expand** and
+**timestamps/durations** in frame titles. Presentation-only framing for the
+installed Pi 1.5.0 / Gentle Pi main build.
+
+Install: symlink or copy this directory into your Pi extension discovery
+directory (`~/.gentle-shell/agent/extensions/message-frames` for gentle-shell,
+`~/.pi/agent/extensions/message-frames` otherwise), then `/reload`.
 
 - `/message-frames on` installs the wrappers.
 - `/message-frames off` restores the original render and mouse descriptors immediately;
@@ -13,6 +17,24 @@ settings changes or dependencies are needed. Run `/reload` to load it.
 - Shutdown/reload restores the originals; a new runtime defaults to on.
   To disable permanently, exclude this extension through the host's existing
   extension controls, or remove its directory from discovery while Pi is closed.
+
+## Collapse and expand (fork)
+
+`ToolExecutionComponent` and `BashExecutionComponent` frames collapse passively:
+only the first `collapsedLines` (default 3) body lines show, plus a hint row
+(`▾ N more lines · click to expand`). A left click on the frame toggles between
+collapsed and expanded; components without their own `handleMouse` (Bash)
+receive an injected click-only handler that is removed again on restore.
+Original `Ctrl+O` expand behavior of the native components still works when
+clicks are routed through the wrapped mouse path.
+
+## Timestamps and durations (fork)
+
+`User` and `Assistant` titles append the message clock (`HH:MM`) from the
+session-entry timestamp Pi already passes to those components. `Tool`, `Bash`
+and `Assistant` titles append a derived duration (`500ms`, `1.5s`, `1:35`)
+measured from first to last render — approximate, frame-accurate only while a
+component is actively streaming. Titles read `Assistant · 1.5s · 14:03`.
 
 ## Integration boundary
 
