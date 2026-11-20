@@ -112,3 +112,27 @@ test('title functions receive lifecycle meta and fmtDuration formats durations',
  assert.equal(fmtDuration(undefined), undefined);
  ctl.restore();
 });
+
+test('done predicate freezes the render-cycle timer at completion', () => {
+ class Tool { render(w) { return ['x']; } }
+ const ctl = installFrames([[Tool, (_c, meta) => `${meta.firstMs}-${meta.lastMs}`, [90,170,230], {done: c => c.finished}]], tui);
+ const inst = new Tool();
+ inst.finished = false;
+ inst.render(20); inst.render(20);
+ const during = inst.render(20).map(plain).join('');
+ inst.finished = true;
+ inst.render(20);
+ const frozen = inst.render(20).map(plain).join('');
+ assert.equal(frozen, during.replace(/\d+-\d+/, m => m)); // lastMs stopped advancing
+ inst.render(20); inst.render(20);
+ assert.equal(inst.render(20).map(plain).join(''), frozen);
+ ctl.restore();
+});
+
+test('timer and clock toggles hide their title parts', () => {
+ class M { render(w) { return ['x']; } }
+ const ctl = installFrames([[M, (_c, m, show) => `${show.timer ? 'T' : '-'}${show.clock ? 'C' : '-'}`, [90,170,230], {timer: () => true, clock: () => true}]], tui);
+ const inst = new M();
+ assert.match(inst.render(20).map(plain).join(''), /TC/);
+ ctl.restore();
+});

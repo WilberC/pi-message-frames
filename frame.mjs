@@ -119,10 +119,13 @@ export function installFrames(targets, tui) {
   const state0 = old;
   const collapse = !!(opts?.collapse);
   const collapsedLines = Math.max(1, opts?.collapsedLines ?? 3);
-  return {proto, title, hue, old: state0, collapse, collapsedLines};
+  const done = opts?.done;
+  const timer = opts?.timer;
+  const clock = opts?.clock;
+  return {proto, title, hue, old: state0, collapse, collapsedLines, done, timer, clock};
  });
  const owned = [];
- for (const {proto, title, hue, old, collapse, collapsedLines} of entries) {
+ for (const {proto, title, hue, old, collapse, collapsedLines, done, timer, clock} of entries) {
   if (old) { old.leases++; owned.push([proto, old]); continue; }
   const descriptor = Object.getOwnPropertyDescriptor(proto, 'render');
   const original = proto.render;
@@ -141,12 +144,17 @@ export function installFrames(targets, tui) {
    layouts.delete(this);
    if (width <= 0) return [];
    let life = lifetimes.get(this);
-   if (!life) { life = {collapsed: collapse ? true : undefined, firstMs: Date.now(), lastMs: 0}; lifetimes.set(this, life); }
-   life.lastMs = Date.now();
+   if (!life) { life = {collapsed: collapse ? true : undefined, firstMs: Date.now(), lastMs: 0, frozen: false}; lifetimes.set(this, life); }
+   // Freeze the render-cycle timer once the component's own work is done, so
+   // unrelated redraws (user idle, other components streaming) do not inflate it.
+   if (!life.frozen && done?.(this)) { life.frozen = true; }
+   if (!life.frozen) life.lastMs = Date.now();
+   life.done = life.frozen;
+   const show = {timer: timer?.(this) ?? true, clock: clock?.(this) ?? true};
    const body = original.call(this, Math.max(1, width - 2));
    if (!body.length) return body; // Preserve intentionally hidden/tool-only components.
    let rows = body.flatMap((s, y) => s.split('\n').map(text => ({text, y, x: 0})));
-   if (title(this) === 'Bash') {
+   if (title(this, life, show) === 'Bash') {
     const indices = rows.flatMap((row, i) => /^─+$/.test(plain(row.text).trim()) ? [i] : []);
     if (indices.length >= 2) rows = rows.filter((_row, i) => i !== indices[0] && i !== indices.at(-1));
    }
@@ -154,7 +162,7 @@ export function installFrames(targets, tui) {
     const hidden = rows.length - collapsedLines;
     rows = [...rows.slice(0, collapsedLines), {text: `▾ ${hidden} more lines · click to expand`, y: 0, x: 0}];
    }
-   const framed = compose(rows, width, title(this, life), hue, tui);
+   const framed = compose(rows, width, title(this, life, show), hue, tui);
    layouts.set(this, {map: framed.map, width: Math.max(1, width - 2), height: body.length});
    return framed.lines;
   };
