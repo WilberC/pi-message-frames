@@ -12,8 +12,18 @@ directory (`~/.gentle-shell/agent/extensions/message-frames` for gentle-shell,
 - `/message-frames on` installs the wrappers.
 - `/message-frames off` restores the original render and mouse descriptors immediately;
   the next normal redraw shows the original presentation.
-- `/message-frames status` reports the current state. Other arguments show
-  `Usage: /message-frames on|off|status` without changing state.
+- `/message-frames status` reports the current state, including both toggles.
+- `/message-frames timer on|off` shows or hides the per-frame duration
+  (`Tool: read · 800ms`). Persisted across sessions.
+- `/message-frames clock on|off` shows or hides the message clock
+  (`User · 14:03`). Persisted across sessions.
+
+Each frame's duration freezes when that frame's own work ends (tool result
+received, bash exit code set, assistant streaming finished, static messages at
+first render), so waiting at the user prompt or watching other frames stream no
+longer inflates a finished frame's time. Other arguments show
+`Usage: /message-frames on|off|status|timer on|off|clock on|off` without
+changing state.
 - Shutdown/reload restores the originals; a new runtime defaults to on.
   To disable permanently, exclude this extension through the host's existing
   extension controls, or remove its directory from discovery while Pi is closed.
