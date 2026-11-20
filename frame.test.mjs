@@ -5,7 +5,7 @@ const root = process.env.PI_PKG_ROOT;
 if (!root) { console.log('SKIP: define PI_PKG_ROOT (carpeta del paquete @earendil-works/pi-coding-agent) para correr este test'); process.exit(0); }
 const require = createRequire(root + '/package.json');
 export const tui = await import(require.resolve('@earendil-works/pi-tui'));
-const { frameLines, installFrames } = await import('./frame.mjs');
+const { frameLines, installFrames, fmtDuration } = await import('./frame.mjs');
 export const plain = s => s.replace(/\x1b\[[0-9;:]*m/g, '').replace(/\x1b\][^\x07]*\x07/g, '');
 
 test('rounded role frames: full geometry, ANSI, Unicode, empty and narrow rows', () => {
@@ -49,4 +49,66 @@ test('outline slicing removes both original rails, including indented Unicode ro
  const rows=frameLines(['  ╭─ old ─╮','  │ 界 é  │','  ╰───────╯'],20,'Custom',[90,170,230],tui).map(plain);
  assert.equal(rows[2].split('│').length-1,2);
  assert.equal(rows[2].slice(1,-1).trim(),'界 é');
+});
+
+test('passive collapse truncates long collapse targets to a hint row and click restores', () => {
+ const body = Array.from({length: 10}, (_,i) => `line ${i}`);
+ class ToolLike { render(w) { return body.map(s => s.slice(0, w)); } handleMouse() { return undefined; } invalidate() {} }
+ const originalRender = ToolLike.prototype.render, originalMouse = ToolLike.prototype.handleMouse;
+ const ctl = installFrames([[ToolLike, () => 'Tool: read', [90,170,230], {collapse: true, collapsedLines: 3}]], tui);
+ const inst = new ToolLike();
+ const collapsed = inst.render(40);
+ assert.equal(collapsed.length, 6); // 3 body + hint + 2 chrome
+ assert.match(plain(collapsed.at(-2)), /7 more lines/);
+ const click = inst.handleMouse({type: 'click', button: 'left', x: 5, y: 2, screenX: 5, screenY: 2, width: 40, height: collapsed.length});
+ assert.ok(click?.handled);
+ const expanded = inst.render(40);
+ assert.equal(expanded.length, 12); // 10 body + 2 chrome
+ assert.ok(!/more lines/.test(expanded.map(plain).join('')));
+ assert.ok(inst.handleMouse({type: 'click', button: 'left', x: 5, y: 2, screenX: 5, screenY: 2, width: 40, height: expanded.length})?.handled);
+ assert.equal(inst.render(40).length, 6);
+ assert.deepEqual(expanded.slice(1,-1).map(s => plain(s).slice(1,-1).trim()), body.map(s => s.slice(0,38).trim()));
+ ctl.restore();
+ assert.equal(ToolLike.prototype.render, originalRender);
+ assert.equal(ToolLike.prototype.handleMouse, originalMouse);
+});
+
+test('short bodies of collapse targets stay untouched', () => {
+ class ShortTool { render(w) { return ['only one line']; } handleMouse() { return undefined; } }
+ const ctl = installFrames([[ShortTool, () => 'Tool: ls', [90,170,230], {collapse: true}]], tui);
+ const inst = new ShortTool();
+ const rows = inst.render(30);
+ assert.equal(rows.length, 3); // 1 body + 2 chrome
+ assert.ok(!/more lines/.test(rows.map(plain).join('')));
+ ctl.restore();
+});
+
+test('collapse targets without native handleMouse get a click toggle that restores cleanly', () => {
+ class BashLike { render(w) { return ['out one', 'out two', 'out three', 'out four', 'out five']; } invalidate() {} }
+ assert.equal(BashLike.prototype.handleMouse, undefined);
+ const ctl = installFrames([[BashLike, () => 'Bash', [215,170,91], {collapse: true}]], tui);
+ assert.equal(typeof BashLike.prototype.handleMouse, 'function');
+ const inst = new BashLike();
+ const collapsed = inst.render(30);
+ assert.match(plain(collapsed.at(-2)), /more lines/);
+ assert.ok(inst.handleMouse({type: 'click', button: 'left', x: 2, y: 1, screenX: 2, screenY: 1, width: 30, height: collapsed.length})?.handled);
+ assert.ok(!/more lines/.test(inst.render(30).map(plain).join('')));
+ ctl.restore();
+ assert.equal(BashLike.prototype.handleMouse, undefined);
+});
+
+test('title functions receive lifecycle meta and fmtDuration formats durations', () => {
+ class M { render(w) { return ['x']; } }
+ let seen;
+ const ctl = installFrames([[M, (_c, meta) => { seen = meta; return 'Tool'; }, [90,170,230], {collapse: true}]], tui);
+ const inst = new M();
+ inst.render(20); inst.render(20);
+ assert.equal(typeof seen.firstMs, 'number');
+ assert.equal(typeof seen.lastMs, 'number');
+ assert.equal(seen.collapsed, true);
+ assert.equal(fmtDuration(500), '500ms');
+ assert.equal(fmtDuration(1500), '1.5s');
+ assert.equal(fmtDuration(95000), '1:35');
+ assert.equal(fmtDuration(undefined), undefined);
+ ctl.restore();
 });

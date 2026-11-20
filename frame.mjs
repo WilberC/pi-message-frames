@@ -100,47 +100,84 @@ function compose(input, width, title, hue, tui) {
  return {lines:paintedLines,map:[undefined,...rows.map(({src,...row}) => row),undefined]};
 }
 
+export function fmtDuration(ms) {
+ if (ms == null || ms < 0 || !Number.isFinite(ms)) return undefined;
+ if (ms < 1000) return `${Math.round(ms)}ms`;
+ if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+ const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000);
+ return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 export function installFrames(targets, tui) {
  // Preflight all targets before touching any shared prototype.
  for (const [Class] of targets) if (typeof Class?.prototype?.render !== 'function') throw new Error('Unsupported Pi message component render API');
- const entries = targets.map(([Class,title,hue]) => {
+ const lifetimes = new WeakMap();
+ const entries = targets.map(([Class, title, hue, opts]) => {
   const proto = Class.prototype;
   const old = proto[SLOT];
   if (old && (proto.render !== old.wrapper || proto.handleMouse !== old.mouseWrapper)) throw new Error('Unsupported render wrapper conflict; reload without message-frames');
-  return {proto,title,hue,old};
+  const state0 = old;
+  const collapse = !!(opts?.collapse);
+  const collapsedLines = Math.max(1, opts?.collapsedLines ?? 3);
+  return {proto, title, hue, old: state0, collapse, collapsedLines};
  });
  const owned = [];
- for (const {proto,title,hue,old} of entries) {
-  if (old) { old.leases++; owned.push([proto,old]); continue; }
-  const descriptor = Object.getOwnPropertyDescriptor(proto,'render');
+ for (const {proto, title, hue, old, collapse, collapsedLines} of entries) {
+  if (old) { old.leases++; owned.push([proto, old]); continue; }
+  const descriptor = Object.getOwnPropertyDescriptor(proto, 'render');
   const original = proto.render;
-  const mouseDescriptor = Object.getOwnPropertyDescriptor(proto,'handleMouse');
+  const mouseDescriptor = Object.getOwnPropertyDescriptor(proto, 'handleMouse');
   const mouse = proto.handleMouse;
   const layouts = new WeakMap();
-  const state = {original,descriptor,mouseDescriptor,mouse,leases:1,wrapper:undefined,mouseWrapper:mouse};
-  state.wrapper = function(width) {
+  const state = {original, descriptor, mouseDescriptor, mouse, leases: 1, wrapper: undefined, mouseWrapper: mouse, mouseInstalled: false};
+  const toggle = function () {
+   const life = lifetimes.get(this);
+   if (!life) return undefined;
+   life.collapsed = !life.collapsed;
+   this.invalidate?.();
+   return {handled: true};
+  };
+  state.wrapper = function (width) {
    layouts.delete(this);
    if (width <= 0) return [];
-   const body = original.call(this,Math.max(1,width-2));
+   let life = lifetimes.get(this);
+   if (!life) { life = {collapsed: collapse ? true : undefined, firstMs: Date.now(), lastMs: 0}; lifetimes.set(this, life); }
+   life.lastMs = Date.now();
+   const body = original.call(this, Math.max(1, width - 2));
    if (!body.length) return body; // Preserve intentionally hidden/tool-only components.
-   let rows = body.flatMap((s,y) => s.split('\n').map(text => ({text,y,x:0})));
+   let rows = body.flatMap((s, y) => s.split('\n').map(text => ({text, y, x: 0})));
    if (title(this) === 'Bash') {
-    const indices = rows.flatMap((row,i) => /^─+$/.test(plain(row.text).trim()) ? [i] : []);
-    if (indices.length >= 2) rows = rows.filter((_row,i) => i !== indices[0] && i !== indices.at(-1));
+    const indices = rows.flatMap((row, i) => /^─+$/.test(plain(row.text).trim()) ? [i] : []);
+    if (indices.length >= 2) rows = rows.filter((_row, i) => i !== indices[0] && i !== indices.at(-1));
    }
-   const framed = compose(rows,width,title(this),hue,tui);
-   layouts.set(this,{map:framed.map,width:Math.max(1,width-2),height:body.length});
+   if (collapse && life.collapsed && rows.length > collapsedLines + 1) {
+    const hidden = rows.length - collapsedLines;
+    rows = [...rows.slice(0, collapsedLines), {text: `▾ ${hidden} more lines · click to expand`, y: 0, x: 0}];
+   }
+   const framed = compose(rows, width, title(this, life), hue, tui);
+   layouts.set(this, {map: framed.map, width: Math.max(1, width - 2), height: body.length});
    return framed.lines;
   };
-  if (typeof mouse === 'function') state.mouseWrapper = function(event) {
+  if (typeof mouse === 'function') state.mouseWrapper = function (event) {
+   if (collapse && event?.type === 'click' && event.button === 'left') return toggle.call(this, event);
    const layout = layouts.get(this), row = layout?.map[event.y];
-   if (!row || event.x < 1 || event.x >= layout.width+1) return undefined;
-   return mouse.call(this,{...event,x:event.x-1+row.x,y:row.y,width:layout.width,height:layout.height});
+   if (!row || event.x < 1 || event.x >= layout.width + 1) return undefined;
+   return mouse.call(this, {...event, x: event.x - 1 + row.x, y: row.y, width: layout.width, height: layout.height});
   };
-  Object.defineProperty(proto,SLOT,{value:state,configurable:true});
-  Object.defineProperty(proto,'render',{value:state.wrapper,writable:true,configurable:true});
-  if (typeof mouse === 'function') Object.defineProperty(proto,'handleMouse',{value:state.mouseWrapper,writable:true,configurable:true});
-  owned.push([proto,state]);
+  else if (collapse) {
+   state.mouseWrapper = function (event) {
+    if (event?.type !== 'click' || event.button !== 'left') return undefined;
+    const layout = layouts.get(this);
+    if (!layout || event.y < 0 || event.y >= layout.map.length) return undefined;
+    return toggle.call(this, event);
+   };
+   Object.defineProperty(proto, 'handleMouse', {value: state.mouseWrapper, writable: true, configurable: true});
+   state.mouseInstalled = true;
+  }
+  Object.defineProperty(proto, SLOT, {value: state, configurable: true});
+  Object.defineProperty(proto, 'render', {value: state.wrapper, writable: true, configurable: true});
+  if (typeof mouse === 'function') Object.defineProperty(proto, 'handleMouse', {value: state.mouseWrapper, writable: true, configurable: true});
+  owned.push([proto, state]);
  }
  let restored = false;
  return { restore() {
@@ -152,7 +189,7 @@ export function installFrames(targets, tui) {
     if (state.descriptor) Object.defineProperty(proto,'render',state.descriptor);
     else delete proto.render;
    }
-   if (proto.handleMouse === state.mouseWrapper && typeof state.mouse === 'function') {
+   if (proto.handleMouse === state.mouseWrapper && (typeof state.mouse === 'function' || state.mouseInstalled)) {
     if (state.mouseDescriptor) Object.defineProperty(proto,'handleMouse',state.mouseDescriptor);
     else delete proto.handleMouse;
    }
