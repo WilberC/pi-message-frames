@@ -118,8 +118,8 @@ test('actual Pi loader, lifecycle, command help and reload identity', async () =
  const command=ext.commands.get('message-frames').handler;
  await command('off',ctx); await command('on',ctx); assert.notEqual(pi.UserMessageComponent.prototype.render,original);
  await command('off',ctx); assert.equal(pi.UserMessageComponent.prototype.render,original);
- await command('invalid',ctx); assert.deepEqual(notices.at(-1),['Usage: /message-frames on|off|status|timer on|off|clock on|off','error']);
- await command('status',ctx); assert.deepEqual(notices.at(-1),['Message frames: off · timer: on · clock: on','info']);
+ await command('invalid',ctx); assert.deepEqual(notices.at(-1),['Usage: /message-frames on|off|status|timer on|off|start on|off|end on|off','error']);
+ await command('status',ctx); assert.deepEqual(notices.at(-1),['Message frames: off · timer: on · start: on · end: on','info']);
 });
 
 test('OSC 133 prompt zones stay at line start where the host filters them', () => {
@@ -175,12 +175,51 @@ test('timer and clock toggles persist and apply without re-enabling', async () =
   assert.match((await run('clock off')).join(''),/clock: off/i);
   const saved = JSON.parse(fs.readFileSync(pmod.join(tmp,'message-frames.json'),'utf8'));
   assert.equal(saved.timer,false); assert.equal(saved.clock,false);
-  assert.match((await run('status')).join(''),/timer: off[\s\S]*clock: off/i);
+  assert.match((await run('status')).join(''),/timer: off[\s\S]*start: off/i);
   const TS='2026-11-20T14:03:00Z';
   const mk = () => new pi.UserMessageComponent('hi', undefined, 1, [], 'id', TS);
   assert.ok(!/\d{2}:\d{2}/.test(mk().render(30).map(plain)[0]), 'clock off hides the clock');
   await run('timer on'); await run('clock on');
   assert.match(mk().render(30).map(plain)[0],/\d{2}:\d{2}/, 'clock on shows the clock again');
+  await ext.handlers.get('session_shutdown')[0]({},ctx);
+ } finally { process.env.PI_CODING_AGENT_DIR = prevDir; fs.rmSync(tmp,{recursive:true,force:true}); }
+});
+
+test('start and end timestamps show for live frames and toggle independently', async () => {
+ pi.initTheme('dark');
+ const os = await import('node:os');
+ const fs = await import('node:fs');
+ const pmod = await import('node:path');
+ const tmp = fs.mkdtempSync(pmod.join(os.tmpdir(),'pmf-se-'));
+ const prevDir = process.env.PI_CODING_AGENT_DIR;
+ process.env.PI_CODING_AGENT_DIR = tmp;
+ try {
+  const loaded = await loadExtensions([new URL('./index.ts',import.meta.url).pathname],process.cwd());
+  assert.deepEqual(loaded.errors,[]);
+  const ext = loaded.extensions[0];
+  const notices=[]; const ctx={mode:'tui',ui:{notify:(...v)=>notices.push(v)}};
+  await ext.handlers.get('session_start')[0]({},ctx);
+  const run = async (a) => { notices.length=0; await ext.commands.get('message-frames').handler(a,ctx); return notices.map(n=>n.join(' ')); };
+  // Assistant frame that finished: start and end times plus duration
+  const a = new pi.AssistantMessageComponent();
+  a.updateContent({role:'assistant',content:[{type:'text',text:'hi'}]}, true);
+  a.render(40);
+  a.updateContent({role:'assistant',content:[{type:'text',text:'done'}]}, false);
+  const head = a.render(40).map(plain)[0];
+  assert.match(head, /\d{2}:\d{2}[–—-]\d{2}:\d{2}/, 'finished assistant shows start–end');
+  // Divider-only toggle: end off removes the end half, start stays
+  await run('end off');
+  const a2 = new pi.AssistantMessageComponent();
+  a2.updateContent({role:'assistant',content:[{type:'text',text:'x'}]}, true);
+  a2.render(40);
+  a2.updateContent({role:'assistant',content:[{type:'text',text:'x'}]}, false);
+  const head2 = a2.render(40).map(plain)[0];
+  assert.doesNotMatch(head2, /\d{2}:\d{2}[–—-]\d{2}:\d{2}/, 'end off removes the range');
+  assert.match(head2, /\d{2}:\d{2}/, 'start still visible');
+  assert.match((await run('status')).join(''), /start: on[\s\S]*end: off/i);
+  // static frame: start only, never a range
+  const u = new pi.UserMessageComponent('hi', undefined, 1, [], 'id', '2026-11-20T14:03:00Z');
+  assert.doesNotMatch(u.render(30).map(plain)[0], /[–—-]/, 'static frames show no end');
   await ext.handlers.get('session_shutdown')[0]({},ctx);
  } finally { process.env.PI_CODING_AGENT_DIR = prevDir; fs.rmSync(tmp,{recursive:true,force:true}); }
 });
