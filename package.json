@@ -1,6 +1,6 @@
 {
   "name": "pi-message-frames",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Presentation-only colored frames around Pi chat messages (user, assistant, tools, bash, summaries), with passive collapse, click-to-expand and timestamps. Fork of RamonsDka's message-frames (MIT).",
   "license": "MIT",
   "type": "module",
