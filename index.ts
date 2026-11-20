@@ -1,6 +1,20 @@
 import { UserMessageComponent, AssistantMessageComponent, ToolExecutionComponent, BashExecutionComponent, CustomMessageComponent, CompactionSummaryMessageComponent, BranchSummaryMessageComponent, SkillInvocationMessageComponent, InteractiveMode, type ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import * as tui from '@earendil-works/pi-tui';
-import { installFrames } from './frame.mjs';
+import { installFrames, fmtDuration } from './frame.mjs';
+
+// '14:03' from a session-entry timestamp string; omitted when unparseable.
+function clockOf(ts: unknown): string {
+ const d = ts ? new Date(ts as string) : null;
+ return d && !isNaN(d.getTime())
+  ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  : '';
+}
+
+function label(base: string, life: { firstMs: number; lastMs: number } | undefined, ts: unknown): string {
+ const dur = life && life.lastMs > life.firstMs ? fmtDuration(life.lastMs - life.firstMs) : undefined;
+ const clock = clockOf(ts);
+ return [base, dur, clock].filter(Boolean).join(' · ');
+}
 
 export default function messageFrames(pi: ExtensionAPI) {
  let controller: ReturnType<typeof installFrames> | undefined;
@@ -17,10 +31,10 @@ export default function messageFrames(pi: ExtensionAPI) {
     chatContainer: {addChild: (component: any) => { CustomEntryComponent = component.constructor; }},
    } as any, {customType: 'message-frames-probe'} as any);
    controller = installFrames([
-    [UserMessageComponent, () => 'User', [91, 174, 230]],
-    [AssistantMessageComponent, () => 'Assistant', [156, 136, 224]],
-    [ToolExecutionComponent, (c: any) => c.toolName === 'bash' ? 'Bash (tool)' : `Tool: ${c.toolName}`, [215, 170, 91]],
-    [BashExecutionComponent, () => 'Bash', [215, 170, 91]],
+    [UserMessageComponent, (c: any, m) => label('User', m, c.timestamp), [91, 174, 230]],
+    [AssistantMessageComponent, (c: any, m) => label('Assistant', m, c.timestamp), [156, 136, 224]],
+    [ToolExecutionComponent, (c: any, m) => label(c.toolName === 'bash' ? 'Bash (tool)' : `Tool: ${c.toolName}`, m), [215, 170, 91], {collapse: true}],
+    [BashExecutionComponent, (_c: any, m) => label('Bash', m), [215, 170, 91], {collapse: true}],
     [CustomMessageComponent, (c: any) => /agent/i.test(c.message?.customType ?? '') ? 'Subagent' : 'Custom', [104, 191, 156]],
     [CompactionSummaryMessageComponent, () => 'Compaction', [156, 136, 224]],
     [BranchSummaryMessageComponent, () => 'Branch', [156, 136, 224]],
