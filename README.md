@@ -13,10 +13,13 @@ directory (`~/.gentle-shell/agent/extensions/message-frames` for gentle-shell,
 - `/message-frames off` restores the original render and mouse descriptors immediately;
   the next normal redraw shows the original presentation.
 - `/message-frames status` reports the current state, including both toggles.
-- `/message-frames timer on|off` shows or hides the per-frame duration
-  (`Tool: read · 800ms`). Persisted across sessions.
-- `/message-frames clock on|off` shows or hides the message clock
-  (`User · 14:03`). Persisted across sessions.
+- `/message-frames timer on|off` shows or hides the per-frame duration.
+- `/message-frames start on|off` shows or hides the start time
+  (session clock for user/assistant, first render otherwise).
+- `/message-frames end on|off` shows or hides the end range
+  (`Assistant · 09:03–09:05 · 1.5s`); static frames (user, summaries)
+  never show one. All three persist across sessions and default on.
+  `clock on|off` remains as an alias of `start` for 0.2.0 configs.
 
 Each frame's duration freezes when that frame's own work ends (tool result
 received, bash exit code set, assistant streaming finished, static messages at
