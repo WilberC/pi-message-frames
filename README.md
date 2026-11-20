@@ -36,6 +36,16 @@ and `Assistant` titles append a derived duration (`500ms`, `1.5s`, `1:35`)
 measured from first to last render — approximate, frame-accurate only while a
 component is actively streaming. Titles read `Assistant · 1.5s · 14:03`.
 
+## Credits and license
+
+This is a fork of [`message-frames`](https://github.com/RamonsDka/gs3-sidebar/tree/main/extensions/message-frames)
+by **RamonsDka** (gs3-sidebar), MIT licensed. All framing core — the render
+wrappers, ANSI background compositing, OSC 133 zone preservation, unframing of
+existing chrome and the ownership/restore protocol — is his original work.
+This fork adds passive collapse, click-to-expand, render-cycle metadata and
+timestamp/duration titles, and packages the result as an installable Pi
+package. See LICENSE for the dual copyright notice.
+
 ## Integration boundary
 
 The actual chat-route prototypes are wrapped: UserMessageComponent,

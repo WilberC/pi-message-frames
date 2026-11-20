@@ -4,6 +4,10 @@
   "description": "Presentation-only colored frames around Pi chat messages (user, assistant, tools, bash, summaries), with passive collapse, click-to-expand and timestamps. Fork of RamonsDka's message-frames (MIT).",
   "license": "MIT",
   "type": "module",
+  "author": "WilberC",
+  "contributors": [
+    "RamonsDka (original message-frames, gs3-sidebar)"
+  ],
   "keywords": [
     "pi-package",
     "pi",
@@ -13,6 +17,19 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/WilberC/pi-message-frames.git"
+  },
+  "homepage": "https://github.com/WilberC/pi-message-frames#readme",
+  "bugs": {
+    "url": "https://github.com/WilberC/pi-message-frames/issues"
+  },
+  "files": [
+    "index.ts",
+    "frame.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test"
   },
   "pi": {
     "extensions": [
