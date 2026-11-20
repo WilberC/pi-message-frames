@@ -40,16 +40,19 @@ function hhmm(value: unknown): string {
 
 type Show = { timer: boolean; clock: boolean; start: boolean; end: boolean };
 
+// Icons distinguish each timestamp part: ▶ start clock, ⏹ end clock, ⏱ duration.
 type Life = { firstMs: number; lastMs: number; frozen?: boolean; static?: boolean };
 
-function label(base: string, life: Life | undefined, tsStart: unknown, show: Show): string {
+function label(base: string, life: Life | undefined, tsStart: unknown, show: Show, flags?: {error?: boolean}): string {
  const parts = [base];
  const wallStart = hhmm(typeof tsStart === 'string' || tsStart == null ? tsStart : undefined) || (life && life.firstMs ? hhmm(life.firstMs) : '');
  const measured = !!(life && life.lastMs > life.firstMs);
  const ended = !!(life && life.frozen && !life.static);
- if (show.start && wallStart) parts.push(wallStart);
- if (show.end && ended) parts.push(`${wallStart || '…'}–${hhmm(life!.lastMs)}`);
- if (show.timer && measured) parts.push(String(fmtDuration(life!.lastMs - life!.firstMs)));
+ if (show.start && wallStart) parts.push(`▶ ${wallStart}`);
+ if (show.end && ended) parts.push(`⏹ ${hhmm(life!.lastMs)}`);
+ if (show.timer && measured) parts.push(`⏱ ${String(fmtDuration(life!.lastMs - life!.firstMs))}`);
+ if (flags?.error) parts.push('✗');
+ if (show.timer && life && !life.frozen) parts.push('…');
  return parts.join(' · ');
 }
 
@@ -71,15 +74,15 @@ export default function messageFrames(pi: ExtensionAPI) {
    } as any, {customType: 'message-frames-probe'} as any);
    controller = installFrames([
     // Static messages freeze at first render, so they never carry a duration.
-    [UserMessageComponent, (c: any, m, s) => label('User', m, c.timestamp, s), [91, 174, 230], {done: () => true, visible: live}],
-    [AssistantMessageComponent, (c: any, m, s) => label('Assistant', m, c.timestamp, s), [156, 136, 224], {done: (c: any) => c.isStreaming === false, visible: live}],
-    [ToolExecutionComponent, (c: any, m, s) => label(c.toolName === 'bash' ? 'Bash (tool)' : `Tool: ${c.toolName}`, m, undefined, s), [215, 170, 91], {collapse: true, done: (c: any) => (c as any).isPartial === false, visible: live}],
-    [BashExecutionComponent, (_c: any, m, s) => label('Bash', m, undefined, s), [215, 170, 91], {collapse: true, done: (c: any) => (c as any).exitCode !== undefined, visible: live}],
-    [CustomMessageComponent, (c: any, m, s) => label(/agent/i.test(c.message?.customType ?? '') ? 'Subagent' : 'Custom', m, undefined, s), [104, 191, 156], {done: () => true}],
-    [CompactionSummaryMessageComponent, (_c: any, m, s) => label('Compaction', m, undefined, s), [156, 136, 224], {done: () => true}],
-    [BranchSummaryMessageComponent, (_c: any, m, s) => label('Branch', m, undefined, s), [156, 136, 224], {done: () => true}],
-    [SkillInvocationMessageComponent, (_c: any, m, s) => label('Skill', m, undefined, s), [91, 174, 230], {done: () => true}],
-    [CustomEntryComponent, (_c: any, m, s) => label('Custom entry', m, undefined, s), [104, 191, 156], {done: () => true}],
+    [UserMessageComponent, (c: any, m, s) => label('❯ User', m, c.timestamp, s), [91, 174, 230], {done: () => true, visible: live}],
+    [AssistantMessageComponent, (c: any, m, s) => label('✦ Assistant', m, c.timestamp, s), [156, 136, 224], {done: (c: any) => c.isStreaming === false, visible: live}],
+    [ToolExecutionComponent, (c: any, m, s) => label(c.toolName === 'bash' ? '⚙ Bash (tool)' : `⚙ Tool: ${c.toolName}`, m, undefined, s, {error: (c as any)?.result?.isError === true}), [215, 170, 91], {collapse: true, done: (c: any) => (c as any).isPartial === false, visible: live}],
+    [BashExecutionComponent, (c: any, m, s) => label('$ Bash', m, undefined, s, {error: (c as any).exitCode !== undefined && (c as any).exitCode !== 0}), [215, 170, 91], {collapse: true, done: (c: any) => (c as any).exitCode !== undefined, visible: live}],
+    [CustomMessageComponent, (c: any, m, s) => label(/agent/i.test(c.message?.customType ?? '') ? '⟳ Subagent' : '◇ Custom', m, undefined, s), [104, 191, 156], {done: () => true}],
+    [CompactionSummaryMessageComponent, (_c: any, m, s) => label('≡ Compaction', m, undefined, s), [156, 136, 224], {done: () => true}],
+    [BranchSummaryMessageComponent, (_c: any, m, s) => label('≡ Branch', m, undefined, s), [156, 136, 224], {done: () => true}],
+    [SkillInvocationMessageComponent, (_c: any, m, s) => label('◇ Skill', m, undefined, s), [91, 174, 230], {done: () => true}],
+    [CustomEntryComponent, (_c: any, m, s) => label('◇ Custom entry', m, undefined, s), [104, 191, 156], {done: () => true}],
    ], tui);
   } catch (error) {
    ctx.ui.notify(`Message frames disabled: ${String(error)}`, 'error');

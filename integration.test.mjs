@@ -204,9 +204,14 @@ test('start and end timestamps show for live frames and toggle independently', a
   const a = new pi.AssistantMessageComponent();
   a.updateContent({role:'assistant',content:[{type:'text',text:'hi'}]}, true);
   a.render(40);
+  await new Promise(r => setTimeout(r, 5)); // ensure lastMs > firstMs so the duration icon shows
+  a.render(40); // still streaming: advances the measured window
   a.updateContent({role:'assistant',content:[{type:'text',text:'done'}]}, false);
   const head = a.render(40).map(plain)[0];
-  assert.match(head, /\d{2}:\d{2}[–—-]\d{2}:\d{2}/, 'finished assistant shows start–end');
+  assert.match(head, /▶ \d{2}:\d{2}/, 'start shows with its icon');
+  assert.match(head, /⏹ \d{2}:\d{2}/, 'end shows with its icon');
+  assert.match(head, /⏱ [0-9]/, 'duration shows with its icon');
+  assert.doesNotMatch(head, /\d{2}:\d{2}[–—-]\d{2}:\d{2}/, 'iconed parts replace the start–end range');
   // Divider-only toggle: end off removes the end half, start stays
   await run('end off');
   const a2 = new pi.AssistantMessageComponent();
@@ -214,12 +219,82 @@ test('start and end timestamps show for live frames and toggle independently', a
   a2.render(40);
   a2.updateContent({role:'assistant',content:[{type:'text',text:'x'}]}, false);
   const head2 = a2.render(40).map(plain)[0];
-  assert.doesNotMatch(head2, /\d{2}:\d{2}[–—-]\d{2}:\d{2}/, 'end off removes the range');
-  assert.match(head2, /\d{2}:\d{2}/, 'start still visible');
+  assert.doesNotMatch(head2, /⏹/, 'end off removes the end part');
+  assert.doesNotMatch(head2, /⏱/, 'end off does not affect the duration');
+  assert.match(head2, /▶ \d{2}:\d{2}/, 'start still visible with its icon');
   assert.match((await run('status')).join(''), /start: on[\s\S]*end: off/i);
   // static frame: start only, never a range
   const u = new pi.UserMessageComponent('hi', undefined, 1, [], 'id', '2026-11-20T14:03:00Z');
   assert.doesNotMatch(u.render(30).map(plain)[0], /[–—-]/, 'static frames show no end');
+  await ext.handlers.get('session_shutdown')[0]({},ctx);
+ } finally { process.env.PI_CODING_AGENT_DIR = prevDir; fs.rmSync(tmp,{recursive:true,force:true}); }
+});
+
+test('category glyphs, live marker and error marker', async () => {
+ pi.initTheme('dark');
+ const os = await import('node:os');
+ const fs = await import('node:fs');
+ const pmod = await import('node:path');
+ const tmp = fs.mkdtempSync(pmod.join(os.tmpdir(),'pmf-icons-'));
+ const prevDir = process.env.PI_CODING_AGENT_DIR;
+ process.env.PI_CODING_AGENT_DIR = tmp;
+ try {
+  const loaded = await loadExtensions([new URL('./index.ts',import.meta.url).pathname],process.cwd());
+  assert.deepEqual(loaded.errors,[]);
+  const ext = loaded.extensions[0];
+  const ctx = {mode:'tui',ui:{notify(){}}};
+  await ext.handlers.get('session_start')[0]({},ctx);
+  // Category glyph prefix on the base name
+  const u = new pi.UserMessageComponent('hi');
+  assert.match(u.render(40).map(plain)[0], /❯ User/, 'user frame starts with its glyph');
+  // Live marker … while streaming, gone once done
+  const a = new pi.AssistantMessageComponent();
+  a.updateContent({role:'assistant',content:[{type:'text',text:'x'}]}, true);
+  const live = a.render(40).map(plain)[0];
+  assert.match(live, /…/, 'streaming frame carries the live marker');
+  a.updateContent({role:'assistant',content:[{type:'text',text:'x'}]}, false);
+  assert.doesNotMatch(a.render(40).map(plain)[0], /…/, 'done frame drops the live marker');
+  // Error marker: bash exit code 1 and tool isError
+  const bash = new pi.BashExecutionComponent('cmd',{requestRender(){}});
+  bash.appendOutput('boom'); bash.setComplete(1,false);
+  assert.match(bash.render(40).map(plain)[0], /✗/, 'failed bash shows the error marker');
+  const ok = new pi.BashExecutionComponent('cmd',{requestRender(){}});
+  ok.appendOutput('fine'); ok.setComplete(0,false);
+  assert.doesNotMatch(ok.render(40).map(plain)[0], /✗/, 'successful bash shows no error marker');
+  const tool = new pi.ToolExecutionComponent('read','isolated',{path:'fixture'}, {showImages:false},undefined,{requestRender(){}},'/tmp');
+  tool.updateResult({content:[{type:'text',text:'out'}],details:{},isError:true});
+  assert.match(tool.render(40).map(plain)[0], /✗/, 'errored tool shows the error marker');
+  // Widths stay exact with the new glyphs in the title row
+  const b2 = new pi.BashExecutionComponent('cmd',{requestRender(){}});
+  b2.appendOutput('x'); b2.setComplete(1,false);
+  b2.render(40).forEach(s => assert.equal(tui.visibleWidth(s), 40, 'failed bash rows keep width'));
+  await ext.handlers.get('session_shutdown')[0]({},ctx);
+ } finally { process.env.PI_CODING_AGENT_DIR = prevDir; fs.rmSync(tmp,{recursive:true,force:true}); }
+});
+
+test('combined markers: live and error coexist; live bash clears when done', async () => {
+ pi.initTheme('dark');
+ const os = await import('node:os');
+ const fs = await import('node:fs');
+ const pmod = await import('node:path');
+ const tmp = fs.mkdtempSync(pmod.join(os.tmpdir(),'pmf-combo-'));
+ const prevDir = process.env.PI_CODING_AGENT_DIR;
+ process.env.PI_CODING_AGENT_DIR = tmp;
+ try {
+  const loaded = await loadExtensions([new URL('./index.ts',import.meta.url).pathname],process.cwd());
+  const ext = loaded.extensions[0];
+  const ctx = {mode:'tui',ui:{notify(){}}};
+  await ext.handlers.get('session_start')[0]({},ctx);
+  const b2 = new pi.BashExecutionComponent('cmd',{requestRender(){}});
+  b2.appendOutput('fail');
+  const liveRow = b2.render(40).map(plain)[0];
+  assert.match(liveRow, /…/, 'live bash carries the live marker');
+  b2.setComplete(1,false);
+  b2.render(40);
+  const failedRow = b2.render(40).map(plain)[0];
+  assert.doesNotMatch(failedRow, /…/, 'finished bash drops the live marker');
+  assert.match(failedRow, /✗/, 'failed bash carries the error marker');
+  assert.match(failedRow, /⏹/, 'failed bash carries its end icon');
   await ext.handlers.get('session_shutdown')[0]({},ctx);
  } finally { process.env.PI_CODING_AGENT_DIR = prevDir; fs.rmSync(tmp,{recursive:true,force:true}); }
 });

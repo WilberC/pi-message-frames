@@ -16,8 +16,8 @@ directory (`~/.gentle-shell/agent/extensions/message-frames` for gentle-shell,
 - `/message-frames timer on|off` shows or hides the per-frame duration.
 - `/message-frames start on|off` shows or hides the start time
   (session clock for user/assistant, first render otherwise).
-- `/message-frames end on|off` shows or hides the end range
-  (`Assistant · 09:03–09:05 · 1.5s`); static frames (user, summaries)
+- `/message-frames end on|off` shows or hides the end time
+  (`Assistant · ▶ 09:03 · ⏹ 09:05 · ⏱ 1.5s`); static frames (user, summaries)
   never show one. All three persist across sessions and default on.
   `clock on|off` remains as an alias of `start` for 0.2.0 configs.
 
@@ -47,7 +47,11 @@ clicks are routed through the wrapped mouse path.
 session-entry timestamp Pi already passes to those components. `Tool`, `Bash`
 and `Assistant` titles append a derived duration (`500ms`, `1.5s`, `1:35`)
 measured from first to last render — approximate, frame-accurate only while a
-component is actively streaming. Titles read `Assistant · 1.5s · 14:03`.
+component is actively streaming. Titles read `✦ Assistant · ▶ 14:03 · ⏹ 14:05 · ⏱ 1.5s`. A frame whose
+duration is still running carries a trailing `…`, and a failed result
+appends `✗` (bash exit code ≠ 0, tool `isError`). Leading glyphs identify each
+frame kind: `❯` user, `✦` assistant, `⚙` tool, `$` bash, `⟳` subagent,
+`≡` compaction/branch, `◇` skill/custom.
 
 ## Credits and license
 
