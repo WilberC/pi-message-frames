@@ -56,9 +56,9 @@ Then `/reload` inside the session. To try unreleased changes from `main`:
 
 | I want to… | Read |
 | --- | --- |
-| Learn every command, collapse and timestamp rule | [docs/usage.md](docs/usage.md) |
-| Understand what gets wrapped, and the known limits | [docs/architecture.md](docs/architecture.md) |
-| Run the tests or work on the code | [docs/development.md](docs/development.md) |
+| Learn every command, collapse and timestamp rule | [docs/usage.md](https://github.com/WilberC/pi-message-frames/blob/main/docs/usage.md) |
+| Understand what gets wrapped, and the known limits | [docs/architecture.md](https://github.com/WilberC/pi-message-frames/blob/main/docs/architecture.md) |
+| Run the tests or work on the code | [docs/development.md](https://github.com/WilberC/pi-message-frames/blob/main/docs/development.md) |
 
 ## Credits and license
 
@@ -67,5 +67,5 @@ by **RamonsDka** (gs3-sidebar, MIT). The framing core — render wrappers, ANSI
 background compositing, OSC 133 zone preservation, unframing of existing chrome
 and the ownership/restore protocol — is his original work. This fork adds
 passive collapse, click-to-expand, render-cycle metadata, timestamp/duration
-titles and the Pi package. MIT, see [LICENSE](LICENSE) for the dual copyright
-notice; design references are listed in [docs/architecture.md](docs/architecture.md#references).
+titles and the Pi package. MIT, see [LICENSE](https://github.com/WilberC/pi-message-frames/blob/main/LICENSE) for the dual copyright
+notice; design references are listed in [docs/architecture.md](https://github.com/WilberC/pi-message-frames/blob/main/docs/architecture.md#references).
