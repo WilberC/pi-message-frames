@@ -45,6 +45,23 @@ test('wrapper delegates, restores, handles reload and removes existing chrome on
  assert.throws(() => installFrames([[class {}, ()=>'Bad', []]], tui), /Unsupported/);
 });
 
+test('a throw inside our framing falls back to the original render instead of crashing', () => {
+ class Message { render(w) { return ['\x1b[32mhello\x1b[0m', '', 'tail']; } }
+ const original = Message.prototype.render;
+ const instance = new Message();
+ const ctl = installFrames([[Message, () => { throw new Error('boom'); }, [90,170,230]]], tui);
+ const rows = instance.render(30);
+ assert.deepEqual(rows.map(plain), original.call(instance, 30).map(plain));
+ assert.ok(rows.every(s => !s.includes('╭')));
+ const again = instance.render(30);
+ assert.deepEqual(again.map(plain), original.call(instance, 30).map(plain));
+ ctl.restore(); assert.equal(Message.prototype.render, original);
+ const healthy = new Message();
+ const ctl2 = installFrames([[Message, () => 'Tool: ok', [90,170,230]]], tui);
+ assert.match(plain(healthy.render(30)[0]), /Tool: ok/);
+ ctl2.restore();
+});
+
 test('outline slicing removes both original rails, including indented Unicode rows', () => {
  const rows=frameLines(['  ╭─ old ─╮','  │ 界 é  │','  ╰───────╯'],20,'Custom',[90,170,230],tui).map(plain);
  assert.equal(rows[2].split('│').length-1,2);

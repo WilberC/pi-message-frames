@@ -145,6 +145,12 @@ export function installFrames(targets, tui) {
    let life = lifetimes.get(this);
    const first = !life;
    if (!life) { life = {collapsed: collapse ? true : undefined, firstMs: Date.now(), lastMs: 0, frozen: false}; lifetimes.set(this, life); }
+   // A presentation bug here must never kill the render cycle (an uncaught
+   // throw in pi's render closes the whole session). Fall back to the
+   // component's own render for this instance; if the component itself
+   // throws, the rethrow in the fallback propagates its own error unchanged.
+   if (life.failed) return original.call(this, width);
+   try {
    // Freeze the render-cycle timer once the component's own work is done, so
    // unrelated redraws (user idle, other components streaming) do not inflate it.
    // A frame whose done predicate fires on its first render is static: it gets
@@ -170,6 +176,10 @@ export function installFrames(targets, tui) {
    const framed = compose(rows, width, title(this, life, show), hue, tui);
    layouts.set(this, {map: framed.map, width: Math.max(1, width - 2), height: body.length});
    return framed.lines;
+   } catch (error) {
+    life.failed = true;
+    return original.call(this, width);
+   }
   };
   if (typeof mouse === 'function') state.mouseWrapper = function (event) {
    if (collapse && event?.type === 'click' && event.button === 'left') return toggle.call(this, event);
