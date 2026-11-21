@@ -2,6 +2,16 @@
 
 [Back to the README](../README.md)
 
+## Install from a checkout
+
+Symlink or copy this directory into your Pi extension discovery directory
+(`~/.gentle-shell/agent/extensions/message-frames` for Gentle Shell,
+`~/.pi/agent/extensions/message-frames` otherwise), then `/reload`.
+
+The framing was built for the installed Pi 1.5.0 / Gentle Pi main build. It
+wraps private render classes, so re-test after every Pi upgrade (see
+[architecture.md](architecture.md#integration-boundary)).
+
 ## Tests
 
 From the repository root, with `PI_PKG_ROOT` pointing to the installed

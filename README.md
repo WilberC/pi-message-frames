@@ -40,7 +40,9 @@ pi install npm:pi-message-frames
 ```
 
 Then `/reload` inside the session. To try unreleased changes from `main`:
-`pi install git:github.com/WilberC/pi-message-frames`.
+`pi install git:github.com/WilberC/pi-message-frames`. Built against Pi 1.5.0 /
+the Gentle Pi main build; checkout install and version notes:
+[docs/development.md](https://github.com/WilberC/pi-message-frames/blob/main/docs/development.md#install-from-a-checkout).
 
 ## Quick reference
 
