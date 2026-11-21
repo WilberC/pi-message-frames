@@ -146,6 +146,98 @@ test('done predicate freezes the render-cycle timer at completion', () => {
  ctl.restore();
 });
 
+// Counting TUI: truncateToWidth is called once per painted row, so it observes
+// every compose() run without depending on the implementation's own counters.
+function counting() {
+ const calls = {n: 0};
+ const stub = {...tui, truncateToWidth: (s, w, place) => { calls.n++; return tui.truncateToWidth(s, w, place); }};
+ return [stub, calls];
+}
+
+test('frozen frames reuse painted lines while streaming frames repaint every time', () => {
+ const [stub, calls] = counting();
+ class Frozen { render(w) { return ['static body', 'second row']; } }
+ const ctl = installFrames([[Frozen, () => 'Tool: frozen', [90,170,230], {done: () => true}]], stub);
+ const inst = new Frozen();
+ const first = inst.render(30);
+ const painted = calls.n;
+ assert.ok(painted > 0, 'the first render paints the frame');
+ assert.equal(ctl.hits, 0); assert.equal(ctl.misses, 1);
+ const second = inst.render(30);
+ assert.deepEqual(second, first, 'a cache hit is byte-identical');
+ assert.equal(calls.n, painted, 'a frozen frame must not re-run the framing pipeline');
+ assert.equal(ctl.hits, 1); assert.equal(ctl.misses, 1);
+ assert.deepEqual(inst.render(30), first, 'hits keep returning the same lines');
+ assert.equal(calls.n, painted); assert.equal(ctl.hits, 2);
+ assert.deepEqual(new Frozen().render(30), first, 'a cache hit matches a fresh miss byte for byte');
+ ctl.restore();
+
+ const [stub2, calls2] = counting();
+ class Live { render(w) { return ['same chunk']; } }
+ const live = installFrames([[Live, () => '✦ Assistant', [90,170,230], {done: c => c.finished}]], stub2);
+ const s = new Live(); s.finished = false;
+ const a = s.render(30), afterA = calls2.n;
+ const b = s.render(30);
+ assert.ok(afterA > 0);
+ assert.deepEqual(b, a, 'a streaming repaint keeps the same bytes');
+ assert.ok(calls2.n > afterA, 'a streaming component re-frames on every render');
+ assert.equal(live.hits, 0); assert.equal(live.misses, 2);
+ live.restore();
+});
+
+test('frame cache misses when width, body or collapse state change', () => {
+ const [stub, calls] = counting();
+ class Mut { render(w) { return this.body.map(s => s.slice(0, w)); } invalidate() {} }
+ const ctl = installFrames([[Mut, () => 'Tool: mut', [90,170,230], {collapse: true, collapsedLines: 3, done: () => true}]], stub);
+ const inst = new Mut();
+ inst.body = Array.from({length: 10}, (_, i) => `line ${i}`);
+ const collapsed = inst.render(40);
+ assert.equal(collapsed.length, 6);
+ const collapsedPaints = calls.n;
+ assert.deepEqual(inst.render(40), collapsed);
+ assert.equal(calls.n, collapsedPaints, 'unchanged inputs hit the cache');
+ assert.equal(ctl.hits, 1); assert.equal(ctl.misses, 1);
+ // Collapse toggle is an input: it must repaint.
+ assert.ok(inst.handleMouse({type: 'click', button: 'left', x: 5, y: 2, screenX: 5, screenY: 2, width: 40, height: collapsed.length})?.handled);
+ const expanded = inst.render(40);
+ assert.equal(expanded.length, 12);
+ assert.ok(!/more lines/.test(expanded.map(plain).join('')));
+ assert.ok(calls.n > collapsedPaints, 'the collapse toggle repaints');
+ assert.equal(ctl.hits, 1); assert.equal(ctl.misses, 2);
+ const expandedPaints = calls.n;
+ assert.deepEqual(inst.render(40), expanded);
+ assert.equal(calls.n, expandedPaints); assert.equal(ctl.hits, 2);
+ // Width is an input.
+ const wide = inst.render(50);
+ assert.equal(wide.length, 12);
+ wide.forEach(s => assert.equal(tui.visibleWidth(s), 50));
+ assert.ok(calls.n > expandedPaints, 'a width change repaints');
+ assert.equal(ctl.misses, 3);
+ // Body content is an input.
+ inst.body = [...inst.body.slice(0, -1), 'changed tail'];
+ const changed = inst.render(50);
+ assert.match(changed.map(plain).join(''), /changed tail/);
+ assert.equal(ctl.misses, 4); assert.equal(ctl.hits, 2);
+ assert.deepEqual(inst.render(50), changed);
+ assert.equal(ctl.hits, 3);
+ ctl.restore();
+});
+
+test('cached layouts keep native mouse clicks mapped', () => {
+ const [stub, calls] = counting();
+ const seen = [];
+ class Row { render(w) { return ['aa', 'bb', 'cc']; } handleMouse(e) { seen.push(e); return 'native'; } }
+ const ctl = installFrames([[Row, () => 'Tool: rows', [90,170,230], {done: () => true}]], stub);
+ const inst = new Row();
+ const rows = inst.render(40);
+ const painted = calls.n;
+ assert.deepEqual(inst.render(40), rows); assert.deepEqual(inst.render(40), rows);
+ assert.equal(calls.n, painted); assert.equal(ctl.hits, 2);
+ assert.equal(inst.handleMouse({type: 'click', button: 'left', x: 5, y: 2}), 'native');
+ assert.deepEqual(seen.at(-1), {type: 'click', button: 'left', x: 4, y: 1, width: 38, height: 3});
+ ctl.restore();
+});
+
 test('visible toggles hide their title parts', () => {
  class M { render(w) { return ['x']; } }
  const origRender = M.prototype.render;

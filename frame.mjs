@@ -112,6 +112,9 @@ export function installFrames(targets, tui) {
  // Preflight all targets before touching any shared prototype.
  for (const [Class] of targets) if (typeof Class?.prototype?.render !== 'function') throw new Error('Unsupported Pi message component render API');
  const lifetimes = new WeakMap();
+ // Framing-pipeline activity, exposed for tests: a repaint of a frozen frame
+ // must count as a hit and paint nothing.
+ const cache = {hits: 0, misses: 0};
  const entries = targets.map(([Class, title, hue, opts]) => {
   const proto = Class.prototype;
   const old = proto[SLOT];
@@ -140,8 +143,7 @@ export function installFrames(targets, tui) {
    return {handled: true};
   };
   state.wrapper = function (width) {
-   layouts.delete(this);
-   if (width <= 0) return [];
+   if (width <= 0) { layouts.delete(this); return []; }
    let life = lifetimes.get(this);
    const first = !life;
    if (!life) { life = {collapsed: collapse ? true : undefined, firstMs: Date.now(), lastMs: 0, frozen: false}; lifetimes.set(this, life); }
@@ -149,7 +151,7 @@ export function installFrames(targets, tui) {
    // throw in pi's render closes the whole session). Fall back to the
    // component's own render for this instance; if the component itself
    // throws, the rethrow in the fallback propagates its own error unchanged.
-   if (life.failed) return original.call(this, width);
+   if (life.failed) { layouts.delete(this); return original.call(this, width); }
    try {
    // Freeze the render-cycle timer once the component's own work is done, so
    // unrelated redraws (user idle, other components streaming) do not inflate it.
@@ -163,9 +165,25 @@ export function installFrames(targets, tui) {
    const vis = visible?.(this) ?? {};
    const show = {timer: vis.timer ?? true, start: vis.start ?? true, end: vis.end ?? true};
    const body = original.call(this, Math.max(1, width - 2));
-   if (!body.length) return body; // Preserve intentionally hidden/tool-only components.
+   if (!body.length) { layouts.delete(this); return body; } // Preserve intentionally hidden/tool-only components.
+   // Cost here grows with visible session content: every repaint used to re-run
+   // the whole compose()/unframe()/background() pipeline for every message,
+   // frozen ones included, even though their body can no longer change. Keep
+   // the painted lines of the last render and reuse them while inputs hold.
+   const head = title(this, life, show);
+   const collapsed = !!(collapse && life.collapsed);
+   const bodyKey = body.join('\u0000');
+   const cached = layouts.get(this);
+   // Only a frozen (done) frame is stable enough to serve from cache; a
+   // streaming frame misses because its body or title keeps moving.
+   if (cached && life.frozen && cached.frameWidth === width && cached.height === body.length &&
+       cached.bodyKey === bodyKey && cached.titleKey === head && cached.collapsed === collapsed) {
+    cache.hits++;
+    return cached.lines;
+   }
+   cache.misses++;
    let rows = body.flatMap((s, y) => s.split('\n').map(text => ({text, y, x: 0})));
-   if (title(this, life, show) === 'Bash') {
+   if (head === 'Bash') {
     const indices = rows.flatMap((row, i) => /^─+$/.test(plain(row.text).trim()) ? [i] : []);
     if (indices.length >= 2) rows = rows.filter((_row, i) => i !== indices[0] && i !== indices.at(-1));
    }
@@ -173,11 +191,14 @@ export function installFrames(targets, tui) {
     const hidden = rows.length - collapsedLines;
     rows = [...rows.slice(0, collapsedLines), {text: `▾ ${hidden} more lines · click to expand`, y: 0, x: 0}];
    }
-   const framed = compose(rows, width, title(this, life, show), hue, tui);
-   layouts.set(this, {map: framed.map, width: Math.max(1, width - 2), height: body.length});
+   const framed = compose(rows, width, head, hue, tui);
+   // The click map travels with the lines, so a cache hit keeps it valid.
+   layouts.set(this, {map: framed.map, width: Math.max(1, width - 2), height: body.length,
+    frameWidth: width, bodyKey, titleKey: head, collapsed, lines: framed.lines});
    return framed.lines;
    } catch (error) {
     life.failed = true;
+    layouts.delete(this);
     return original.call(this, width);
    }
   };
@@ -203,7 +224,7 @@ export function installFrames(targets, tui) {
   owned.push([proto, state]);
  }
  let restored = false;
- return { restore() {
+ return { get hits() { return cache.hits; }, get misses() { return cache.misses; }, restore() {
   if (restored) return;
   restored = true;
   for (const [proto,state] of owned) {
