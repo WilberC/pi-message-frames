@@ -75,9 +75,9 @@ export default function messageFrames(pi: ExtensionAPI) {
    controller = installFrames([
     // Static messages freeze at first render, so they never carry a duration.
     [UserMessageComponent, (c: any, m, s) => label('❯ User', m, c.timestamp, s), [91, 174, 230], {done: () => true, visible: live}],
-    [AssistantMessageComponent, (c: any, m, s) => label('✦ Assistant', m, c.timestamp, s), [156, 136, 224], {done: (c: any) => c.isStreaming === false, visible: live}],
-    [ToolExecutionComponent, (c: any, m, s) => label(c.toolName === 'bash' ? '⚙ Bash (tool)' : `⚙ Tool: ${c.toolName}`, m, undefined, s, {error: (c as any)?.result?.isError === true}), [215, 170, 91], {collapse: true, done: (c: any) => (c as any).isPartial === false, visible: live}],
-    [BashExecutionComponent, (c: any, m, s) => label('$ Bash', m, undefined, s, {error: (c as any).exitCode !== undefined && (c as any).exitCode !== 0}), [215, 170, 91], {collapse: true, done: (c: any) => (c as any).exitCode !== undefined, visible: live}],
+    [AssistantMessageComponent, (c: any, m, s) => label('✦ Assistant', m, c.timestamp, s), [156, 136, 224], {done: (c: any) => c.isStreaming === false, visible: live, settle: true}],
+    [ToolExecutionComponent, (c: any, m, s) => label(c.toolName === 'bash' ? '⚙ Bash (tool)' : `⚙ Tool: ${c.toolName}`, m, undefined, s, {error: (c as any)?.result?.isError === true}), [215, 170, 91], {collapse: true, done: (c: any) => (c as any).isPartial === false, visible: live, settle: true}],
+    [BashExecutionComponent, (c: any, m, s) => label('$ Bash', m, undefined, s, {error: (c as any).exitCode !== undefined && (c as any).exitCode !== 0}), [215, 170, 91], {collapse: true, done: (c: any) => (c as any).exitCode !== undefined || ((c as any).status ?? 'running') !== 'running', visible: live}],
     [CustomMessageComponent, (c: any, m, s) => label(/agent/i.test(c.message?.customType ?? '') ? '⟳ Subagent' : '◇ Custom', m, undefined, s), [104, 191, 156], {done: () => true}],
     [CompactionSummaryMessageComponent, (_c: any, m, s) => label('≡ Compaction', m, undefined, s), [156, 136, 224], {done: () => true}],
     [BranchSummaryMessageComponent, (_c: any, m, s) => label('≡ Branch', m, undefined, s), [156, 136, 224], {done: () => true}],
@@ -89,6 +89,9 @@ export default function messageFrames(pi: ExtensionAPI) {
   }
  };
  pi.on('session_start', (_event,ctx) => { if (!disabled) enable(ctx); });
+ // A run that ends (abort, error, cancelled tool) without a tool reporting its
+ // final result would otherwise keep that frame live and repainting forever.
+ pi.on('agent_settled', () => { controller?.settle(); });
  pi.on('session_shutdown', () => { controller?.restore(); controller = undefined; });
  pi.registerCommand('message-frames', {
   description: 'Message frames: on | off | status | timer on|off | clock on|off (presentation only; default on after reload)',

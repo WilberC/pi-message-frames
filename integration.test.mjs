@@ -298,3 +298,34 @@ test('combined markers: live and error coexist; live bash clears when done', asy
   await ext.handlers.get('session_shutdown')[0]({},ctx);
  } finally { process.env.PI_CODING_AGENT_DIR = prevDir; fs.rmSync(tmp,{recursive:true,force:true}); }
 });
+
+test('agent_settled freezes a tool frame that never completed; cancelled bash freezes', async () => {
+ pi.initTheme('dark');
+ const os = await import('node:os');
+ const fs = await import('node:fs');
+ const pmod = await import('node:path');
+ const tmp = fs.mkdtempSync(pmod.join(os.tmpdir(),'pmf-settle-'));
+ const prevDir = process.env.PI_CODING_AGENT_DIR;
+ process.env.PI_CODING_AGENT_DIR = tmp;
+ try {
+  const loaded = await loadExtensions([new URL('./index.ts',import.meta.url).pathname],process.cwd());
+  assert.deepEqual(loaded.errors,[]);
+  const ext = loaded.extensions[0];
+  const ctx = {mode:'tui',ui:{notify(){}}};
+  await ext.handlers.get('session_start')[0]({},ctx);
+  const tool = new pi.ToolExecutionComponent('read','stuck',{path:'fixture'}, {showImages:false},undefined,{requestRender(){}},'/tmp');
+  tool.updateResult({content:[{type:'text',text:'partial'}],details:{}}, true);
+  assert.match(tool.render(40).map(plain)[0], /…/, 'partial tool is live');
+  const running = new pi.BashExecutionComponent('sleep',{requestRender(){}});
+  running.appendOutput('x');
+  assert.match(running.render(40).map(plain)[0], /…/);
+  await ext.handlers.get('agent_settled')[0]({},ctx);
+  assert.doesNotMatch(tool.render(40).map(plain)[0], /…/, 'settled tool drops the live marker');
+  assert.match(running.render(40).map(plain)[0], /…/, 'a user bash still running is not frozen by settle');
+  const cancelled = new pi.BashExecutionComponent('cmd',{requestRender(){}});
+  cancelled.appendOutput('x'); cancelled.setComplete(undefined,true);
+  assert.doesNotMatch(cancelled.render(40).map(plain)[0], /…/, 'cancelled bash is done');
+  running.setComplete(0,false);
+  await ext.handlers.get('session_shutdown')[0]({},ctx);
+ } finally { process.env.PI_CODING_AGENT_DIR = prevDir; fs.rmSync(tmp,{recursive:true,force:true}); }
+});

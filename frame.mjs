@@ -72,32 +72,50 @@ function compose(input, width, title, hue, tui) {
  // Tag source indices so zones follow surviving rows when unframe drops chrome.
  const rows = unframe(input.map((row,src) => ({...row,src,text:row.text.replace(ZONE,'')})),tui);
  const lines = rows.map(row => row.text);
- const label = tui.truncateToWidth(` ${title} `, inner, '');
- const raw = [width === 1 ? '╭' : `╭${label}${'─'.repeat(Math.max(0,inner-tui.visibleWidth(label)))}╮`,
+ const raw = [titleRow(title, width, tui),
   ...(lines.length ? lines : ['']).map(s => {
    const fit = tui.truncateToWidth(s,inner,'');
    return width === 1 ? '│' : `│${fit}${' '.repeat(Math.max(0,inner-tui.visibleWidth(fit)))}│`;
   }), width === 1 ? '╰' : `╰${'─'.repeat(inner)}╯`];
- const paintedLines = raw.map((s,y) => {
-  // Vertical wash plus stable low-amplitude grain; simulated alpha, no timers.
-  const mix = 0.13 + 0.035*y/Math.max(1,raw.length-1) + ((y*17%7)-3)*0.002;
-  const rgb = hue.map(v => Math.round(16*(1-mix)+v*mix));
-  const bg = `\x1b[48;2;${rgb.join(';')}m`;
-  const fg = `\x1b[38;2;${hue.join(';')}m`;
-  const painted = background(s,bg);
-  if (y > 0 && y < raw.length-1 && width > 1) {
-   return bg + fg + '│\x1b[39m' + painted.slice(1,-1) + fg + '│' + RESET;
-  }
-  return bg + fg + painted + RESET;
- });
+ const paintedLines = raw.map((s,y) => paintRow(s,y,raw.length,width,hue));
  // First zone (prompt start) marks the frame top; others keep their body row.
+ let head = '';
  zones.forEach((zone,i) => {
   if (!zone) return;
   let y = 0;
   if (i > 0) { const at = rows.findLastIndex(row => row.src <= i); y = at < 0 ? 0 : at+1; }
+  if (y === 0) head = zone + head;
   paintedLines[y] = zone + paintedLines[y];
  });
- return {lines:paintedLines,map:[undefined,...rows.map(({src,...row}) => row),undefined]};
+ return {lines:paintedLines,map:[undefined,...rows.map(({src,...row}) => row),undefined],head};
+}
+
+// Vertical wash plus stable low-amplitude grain; simulated alpha, no timers.
+// Row 0 does not depend on the frame height, so a title can repaint alone.
+function paintRow(s, y, count, width, hue) {
+ const mix = 0.13 + 0.035*y/Math.max(1,count-1) + ((y*17%7)-3)*0.002;
+ const rgb = hue.map(v => Math.round(16*(1-mix)+v*mix));
+ const bg = `\x1b[48;2;${rgb.join(';')}m`;
+ const fg = `\x1b[38;2;${hue.join(';')}m`;
+ const painted = background(s,bg);
+ if (y > 0 && y < count-1 && width > 1) {
+  return bg + fg + '│\x1b[39m' + painted.slice(1,-1) + fg + '│' + RESET;
+ }
+ return bg + fg + painted + RESET;
+}
+
+function titleRow(title, width, tui) {
+ if (width === 1) return '╭';
+ const inner = Math.max(0,width-2);
+ const label = tui.truncateToWidth(` ${title} `, inner, '');
+ return `╭${label}${'─'.repeat(Math.max(0,inner-tui.visibleWidth(label)))}╮`;
+}
+
+// Element-wise string identity: no join, no allocation on the keystroke path.
+function sameLines(a, b) {
+ if (a.length !== b.length) return false;
+ for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+ return true;
 }
 
 export function fmtDuration(ms) {
@@ -114,7 +132,10 @@ export function installFrames(targets, tui) {
  const lifetimes = new WeakMap();
  // Framing-pipeline activity, exposed for tests: a repaint of a frozen frame
  // must count as a hit and paint nothing.
- const cache = {hits: 0, misses: 0};
+ const cache = {hits: 0, misses: 0, titles: 0};
+ // Unfrozen frames whose target opted into settle(): frozen when the agent
+ // settles, so a tool that never reported completion stops repainting live.
+ const unsettled = new Set();
  const entries = targets.map(([Class, title, hue, opts]) => {
   const proto = Class.prototype;
   const old = proto[SLOT];
@@ -124,10 +145,11 @@ export function installFrames(targets, tui) {
   const collapsedLines = Math.max(1, opts?.collapsedLines ?? 3);
   const done = opts?.done;
   const visible = opts?.visible;
-  return {proto, title, hue, old: state0, collapse, collapsedLines, done, visible};
+  const settle = !!(opts?.settle);
+  return {proto, title, hue, old: state0, collapse, collapsedLines, done, visible, settle};
  });
  const owned = [];
- for (const {proto, title, hue, old, collapse, collapsedLines, done, visible} of entries) {
+ for (const {proto, title, hue, old, collapse, collapsedLines, done, visible, settle} of entries) {
   if (old) { old.leases++; owned.push([proto, old]); continue; }
   const descriptor = Object.getOwnPropertyDescriptor(proto, 'render');
   const original = proto.render;
@@ -147,6 +169,7 @@ export function installFrames(targets, tui) {
    let life = lifetimes.get(this);
    const first = !life;
    if (!life) { life = {collapsed: collapse ? true : undefined, firstMs: Date.now(), lastMs: 0, frozen: false}; lifetimes.set(this, life); }
+   if (first && settle) unsettled.add(this);
    // A presentation bug here must never kill the render cycle (an uncaught
    // throw in pi's render closes the whole session). Fall back to the
    // component's own render for this instance; if the component itself
@@ -158,6 +181,7 @@ export function installFrames(targets, tui) {
    // A frame whose done predicate fires on its first render is static: it gets
    // a start time but no meaningful end or duration.
    if (!life.frozen && done?.(this)) { life.frozen = true; life.static = first; }
+   if (life.frozen) unsettled.delete(this);
    if (!life.frozen) life.lastMs = Date.now();
    life.done = life.frozen;
    // Three independent title parts: duration, start time, end time. Each
@@ -166,20 +190,23 @@ export function installFrames(targets, tui) {
    const show = {timer: vis.timer ?? true, start: vis.start ?? true, end: vis.end ?? true};
    const body = original.call(this, Math.max(1, width - 2));
    if (!body.length) { layouts.delete(this); return body; } // Preserve intentionally hidden/tool-only components.
-   // Cost here grows with visible session content: every repaint used to re-run
-   // the whole compose()/unframe()/background() pipeline for every message,
-   // frozen ones included, even though their body can no longer change. Keep
-   // the painted lines of the last render and reuse them while inputs hold.
+   // Pi re-renders the whole chat on every keystroke, so this path runs once
+   // per message per key. compose() is pure in (body, width, title, collapse
+   // state): reuse the painted lines while those hold, for any frame. The body
+   // check compares line identity, never a joined copy of the whole text.
    const head = title(this, life, show);
    const collapsed = !!(collapse && life.collapsed);
-   const bodyKey = body.join('\u0000');
    const cached = layouts.get(this);
-   // Only a frozen (done) frame is stable enough to serve from cache; a
-   // streaming frame misses because its body or title keeps moving.
-   if (cached && life.frozen && cached.frameWidth === width && cached.height === body.length &&
-       cached.bodyKey === bodyKey && cached.titleKey === head && cached.collapsed === collapsed) {
-    cache.hits++;
-    return cached.lines;
+   if (cached && cached.frameWidth === width && cached.collapsed === collapsed && sameLines(cached.body, body)) {
+    if (cached.titleKey === head) { cache.hits++; return cached.lines; }
+    // Only the title moved (live timer, end time, markers): repaint row 0.
+    if ((cached.titleKey === 'Bash') === (head === 'Bash')) {
+     cache.titles++;
+     const lines = cached.lines.slice();
+     lines[0] = cached.head + paintRow(titleRow(head, width, tui), 0, lines.length, width, cached.hue);
+     layouts.set(this, {...cached, titleKey: head, lines});
+     return lines;
+    }
    }
    cache.misses++;
    let rows = body.flatMap((s, y) => s.split('\n').map(text => ({text, y, x: 0})));
@@ -193,8 +220,9 @@ export function installFrames(targets, tui) {
    }
    const framed = compose(rows, width, head, hue, tui);
    // The click map travels with the lines, so a cache hit keeps it valid.
+   // body is copied: a component may mutate its returned array in place.
    layouts.set(this, {map: framed.map, width: Math.max(1, width - 2), height: body.length,
-    frameWidth: width, bodyKey, titleKey: head, collapsed, lines: framed.lines});
+    frameWidth: width, body: body.slice(), titleKey: head, collapsed, lines: framed.lines, head: framed.head, hue});
    return framed.lines;
    } catch (error) {
     life.failed = true;
@@ -224,9 +252,18 @@ export function installFrames(targets, tui) {
   owned.push([proto, state]);
  }
  let restored = false;
- return { get hits() { return cache.hits; }, get misses() { return cache.misses; }, restore() {
+ return { get hits() { return cache.hits; }, get misses() { return cache.misses; }, get titles() { return cache.titles; },
+ settle() {
+  for (const inst of unsettled) {
+   const life = lifetimes.get(inst);
+   if (life && !life.frozen) { life.frozen = true; life.static = false; }
+  }
+  unsettled.clear();
+ },
+ restore() {
   if (restored) return;
   restored = true;
+  unsettled.clear();
   for (const [proto,state] of owned) {
    if (--state.leases) continue;
    if (proto.render === state.wrapper) {

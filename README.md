@@ -53,6 +53,19 @@ appends `✗` (bash exit code ≠ 0, tool `isError`). Leading glyphs identify ea
 frame kind: `❯` user, `✦` assistant, `⚙` tool, `$` bash, `⟳` subagent,
 `≡` compaction/branch, `◇` skill/custom.
 
+When the agent settles (`agent_settled`), any tool or assistant frame that
+never reported completion (aborted run, cancelled tool) is frozen, so its `…`
+marker and running duration stop. A cancelled user bash (`!cmd`) counts as
+done.
+
+## Performance
+
+Pi re-renders the whole chat on every keystroke, so the frame wrapper runs
+once per message per key. Painted frames are cached per component and reused
+while the body lines (compared by identity), width, title and collapse state
+are unchanged. When only the title moves (live timer, end time, markers), just
+the title row is repainted.
+
 ## Credits and license
 
 This is a fork of [`message-frames`](https://github.com/RamonsDka/gs3-sidebar/tree/main/extensions/message-frames)

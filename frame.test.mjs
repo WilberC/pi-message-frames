@@ -180,8 +180,9 @@ test('frozen frames reuse painted lines while streaming frames repaint every tim
  const b = s.render(30);
  assert.ok(afterA > 0);
  assert.deepEqual(b, a, 'a streaming repaint keeps the same bytes');
- assert.ok(calls2.n > afterA, 'a streaming component re-frames on every render');
- assert.equal(live.hits, 0); assert.equal(live.misses, 2);
+ // Framing is pure in its inputs: an unchanged streaming frame reuses its paint.
+ assert.equal(calls2.n, afterA, 'an unchanged streaming frame does not re-frame');
+ assert.equal(live.hits, 1); assert.equal(live.misses, 1);
  live.restore();
 });
 
@@ -249,4 +250,81 @@ test('visible toggles hide their title parts', () => {
  assert.match(new M().render(20).map(plain).join(''), /T1S1E1/);
  off.restore();
  assert.equal(M.prototype.render, origRender);
+});
+
+test('an unfrozen frame whose title moves repaints only its title row', () => {
+ const [stub, calls] = counting();
+ class Stuck { render(w) { return ['body one', 'body two', 'body three']; } }
+ let tick = 0;
+ const ctl = installFrames([[Stuck, () => `⚙ Tool · ⏱ ${tick}s · …`, [215,170,91], {done: () => false}]], stub);
+ const inst = new Stuck();
+ const first = inst.render(40);
+ const afterFirst = calls.n;
+ tick = 1;
+ const second = inst.render(40);
+ assert.equal(calls.n - afterFirst, 1, 'only the title row is re-truncated and painted');
+ assert.deepEqual(second.slice(1), first.slice(1), 'body rows are reused byte for byte');
+ assert.match(plain(second[0]), /⏱ 1s/);
+ ctl.restore();
+ const ref = installFrames([[Stuck, () => `⚙ Tool · ⏱ 1s · …`, [215,170,91], {done: () => false}]], tui);
+ assert.deepEqual(new Stuck().render(40), second, 'a title-only repaint matches a full paint');
+ ref.restore();
+});
+
+test('an unfrozen frame with unchanged title and body is served from cache', () => {
+ const [stub, calls] = counting();
+ class Live { render(w) { return this.body.slice(); } }
+ const ctl = installFrames([[Live, () => '✦ Assistant', [90,170,230], {done: () => false}]], stub);
+ const s = new Live(); s.body = ['chunk'];
+ const a = s.render(30), painted = calls.n;
+ assert.deepEqual(s.render(30), a);
+ assert.equal(calls.n, painted);
+ assert.equal(ctl.hits, 1);
+ s.body.push('more');
+ assert.match(s.render(30).map(plain).join(''), /more/, 'a body change repaints');
+ assert.equal(ctl.misses, 2);
+ ctl.restore();
+});
+
+test('in-place mutation of a returned body array still repaints', () => {
+ class Same { constructor() { this.body = ['one']; } render(w) { return this.body; } }
+ const ctl = installFrames([[Same, () => 'T', [90,170,230], {done: () => true}]], tui);
+ const s = new Same();
+ s.render(30);
+ s.body[0] = 'two';
+ assert.match(s.render(30).map(plain).join(''), /two/);
+ ctl.restore();
+});
+
+test('settle freezes frames that opted in and never reached done', () => {
+ class Tool { render(w) { return ['x']; } }
+ class UserBash { render(w) { return ['y']; } }
+ const seen = new Map();
+ const ctl = installFrames([
+  [Tool, (c, meta) => { seen.set(c, meta.frozen); return meta.frozen ? 'tool done' : 'tool …'; }, [90,170,230], {done: () => false, settle: true}],
+  [UserBash, (c, meta) => meta.frozen ? 'bash done' : 'bash …', [90,170,230], {done: () => false}],
+ ], tui);
+ const t = new Tool(), b = new UserBash();
+ assert.match(plain(t.render(30)[0]), /tool …/);
+ assert.match(plain(b.render(30)[0]), /bash …/);
+ ctl.settle();
+ assert.match(plain(t.render(30)[0]), /tool done/, 'settle freezes opted-in frames');
+ assert.match(plain(b.render(30)[0]), /bash …/, 'frames without settle stay live');
+ ctl.restore();
+});
+
+test('title-only repaint matches a fresh full paint (narrow widths, OSC row-0 zone, Bash transitions)', () => {
+ const Z = '\x1b]133;A\x07', Y = '\x1b]133;B\x07';
+ for (const [body, w] of [[[Z+'start', Y+'out'], 40], [['──','one','──'], 40], [['a','b'], 1], [['a','b'], 2]]) {
+  for (const [t1, t2] of [['T1','T2'], ['Bash','Tool: read'], ['Tool: read','Bash']]) {
+   let title = t1;
+   class Live { render() { return body; } }
+   const ctl = installFrames([[Live, () => title, [90,170,230], {}]], tui);
+   const inst = new Live(); inst.render(w); title = t2;
+   const live = inst.render(w); ctl.restore();
+   class Fresh { render() { return body; } }
+   const ref = installFrames([[Fresh, () => t2, [90,170,230], {}]], tui);
+   assert.deepEqual(live, new Fresh().render(w)); ref.restore();
+  }
+ }
 });
